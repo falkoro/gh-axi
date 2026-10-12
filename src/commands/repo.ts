@@ -44,7 +44,8 @@ flags{create}:
   --public, --private, --internal, --description, --clone, --template
   --source <path> (publish existing local repo; name defaults to source dir name), --push, --remote <name> (both require --source)
 flags{edit}:
-  --description, --visibility, --default-branch, --enable-issues, --enable-wiki
+  --description, --visibility, --default-branch
+  --enable-issues, --enable-wiki (boolean; --enable-issues=false to disable)
 flags{fork}:
   --clone, --remote
 flags{list}:
@@ -192,6 +193,23 @@ async function createRepo(args: string[], ctx?: RepoContext): Promise<string> {
   ]);
 }
 
+// gh's --enable-issues/--enable-wiki are booleans: bare means true and
+// `=false` turns the feature off. A following true/false is still read as the
+// value (the form gh-axi used to require); a following flag never is.
+function getEnableFlag(args: string[], flag: string): string | undefined {
+  let value = args.find((a) => a.startsWith(flag + '='))?.slice(flag.length + 1);
+  if (value === undefined) {
+    const i = args.indexOf(flag);
+    if (i === -1) return undefined;
+    const next = args[i + 1];
+    value = next === undefined || next.startsWith('-') ? 'true' : next;
+  }
+  if (value !== 'true' && value !== 'false') {
+    throw new AxiError(`${flag} must be true or false, got "${value}"`, 'VALIDATION_ERROR');
+  }
+  return value;
+}
+
 async function editRepo(args: string[], ctx?: RepoContext): Promise<string> {
   const ghArgs = ['repo', 'edit'];
   if (ctx && ctx.source !== 'git') ghArgs.push(ctx.nwo);
@@ -201,10 +219,10 @@ async function editRepo(args: string[], ctx?: RepoContext): Promise<string> {
   if (visibility) ghArgs.push('--visibility', visibility);
   const defaultBranch = getFlag(args, '--default-branch');
   if (defaultBranch) ghArgs.push('--default-branch', defaultBranch);
-  const enableIssues = getFlag(args, '--enable-issues');
-  if (enableIssues) ghArgs.push('--enable-issues=' + enableIssues);
-  const enableWiki = getFlag(args, '--enable-wiki');
-  if (enableWiki) ghArgs.push('--enable-wiki=' + enableWiki);
+  for (const flag of ['--enable-issues', '--enable-wiki']) {
+    const value = getEnableFlag(args, flag);
+    if (value) ghArgs.push(`${flag}=${value}`);
+  }
 
   await ghExec(ghArgs); // Don't pass ctx — we handle repo arg ourselves
   const suggestions = getSuggestions({ domain: 'repo', action: 'edit', repo: ctx });
