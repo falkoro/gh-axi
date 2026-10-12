@@ -13,7 +13,7 @@ GitHub CLI for agents — designed with [AXI](https://github.com/kunchenguid/axi
 
 Wraps the official `gh` cli with token-efficient TOON output, contextual next-step suggestions, and structured error handling.
 Built for autonomous agents that interact with GitHub via shell execution.
-Diagnostics from the wrapped `gh` process stream to stderr as they arrive, so approval prompts and errors remain visible while a request is pending.
+Diagnostics the wrapped `gh` process writes while a request is still pending (gh is still running a second later), such as approval prompts, stream to stderr. Diagnostics `gh` writes as it exits are not echoed: a failure is reported once in the structured error, and those from a call that succeeds, including gh-axi's internal fallback attempts, are dropped.
 
 ## Benchmarks
 

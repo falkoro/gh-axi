@@ -62,18 +62,37 @@ function toExecResult(
   };
 }
 
-/** Stream gh diagnostics live while retaining both streams for result handling. */
+/**
+ * How long gh must keep running after a stderr chunk before that chunk is
+ * forwarded live. A notice from a pending request (an approval prompt) outlives
+ * it. The error or warning gh writes as it exits does not, so it is only
+ * retained: a failure reports it once in the structured error, and a call that
+ * succeeds, such as an internal fallback attempt, drops it.
+ */
+const PENDING_STDERR_MS = 1000;
+
+/** Stream gh diagnostics live while it is pending, retaining both streams for result handling. */
 function run(args: string[], input?: string): Promise<ExecResult> {
   debugArgv(args);
   return new Promise((resolve) => {
+    const held = new Set<ReturnType<typeof setTimeout>>();
+    const settle = toExecResult(resolve);
     const child = execFile(
       resolveGhBin(),
       args,
       { maxBuffer: MAX_BUFFER_BYTES },
-      toExecResult(resolve),
+      (error, stdout, stderr) => {
+        for (const timer of held) clearTimeout(timer);
+        settle(error, stdout, stderr);
+      },
     );
     child.stderr?.on("data", (chunk: Buffer | string) => {
-      process.stderr.write(chunk);
+      // Timers with equal delays fire in creation order, so chunks stay ordered.
+      const timer = setTimeout(() => {
+        held.delete(timer);
+        process.stderr.write(chunk);
+      }, PENDING_STDERR_MS);
+      held.add(timer);
     });
     if (input !== undefined) child.stdin?.end(input);
   });
