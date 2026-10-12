@@ -15,15 +15,6 @@ export interface ExecResult {
   exitCode: number;
 }
 
-function buildArgs(args: string[], ctx?: RepoContext): string[] {
-  const out = [...args];
-  // Append --repo for flag/env sources (git remote is auto-detected by gh)
-  if (ctx && ctx.source !== "git") {
-    out.push("--repo", ctx.nwo);
-  }
-  return out;
-}
-
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /** Override the wrapped `gh` binary. Unset or blank keeps PATH lookup (`gh`). */
@@ -72,15 +63,28 @@ function toExecResult(
 const PENDING_STDERR_MS = 1000;
 
 /** Stream gh diagnostics live while it is pending, retaining both streams for result handling. */
-function run(args: string[], input?: string): Promise<ExecResult> {
-  debugArgv(args);
+function run(
+  args: string[],
+  ctx?: RepoContext,
+  input?: string,
+): Promise<ExecResult> {
+  const argv = [...args];
+  let env: NodeJS.ProcessEnv | undefined;
+  // Pass a flag/env repo context on (gh auto-detects a git remote itself).
+  // `gh api` rejects --repo but fills its {owner}/{repo} placeholders from
+  // GH_REPO, so an api call gets the repo there instead.
+  if (ctx && ctx.source !== "git") {
+    if (args[0] === "api") env = { ...process.env, GH_REPO: ctx.nwo };
+    else argv.push("--repo", ctx.nwo);
+  }
+  debugArgv(argv);
   return new Promise((resolve) => {
     const held = new Set<ReturnType<typeof setTimeout>>();
     const settle = toExecResult(resolve);
     const child = execFile(
       resolveGhBin(),
-      args,
-      { maxBuffer: MAX_BUFFER_BYTES },
+      argv,
+      { maxBuffer: MAX_BUFFER_BYTES, env },
       (error, stdout, stderr) => {
         for (const timer of held) clearTimeout(timer);
         settle(error, stdout, stderr);
@@ -98,17 +102,12 @@ function run(args: string[], input?: string): Promise<ExecResult> {
   });
 }
 
-/** Run gh, writing `input` to the child process's stdin instead of the CLI's own. */
-function runWithStdin(args: string[], input: string): Promise<ExecResult> {
-  return run(args, input);
-}
-
 /** Execute gh and return parsed JSON. */
 export async function ghJson<T = unknown>(
   args: string[],
   ctx?: RepoContext,
 ): Promise<T> {
-  const result = await run(buildArgs(args, ctx));
+  const result = await run(args, ctx);
   if (result.stderr === "ENOENT") throw missingGhError();
   if (result.exitCode !== 0) throw mapGhError(result.stderr, result.exitCode);
   try {
@@ -162,7 +161,7 @@ export async function ghExec(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
-  const result = await run(buildArgs(args, ctx));
+  const result = await run(args, ctx);
   if (result.stderr === "ENOENT") throw missingGhError();
   if (result.exitCode !== 0) {
     // Some gh subcommands (e.g. `run watch --exit-status` on a completed
@@ -187,7 +186,7 @@ export async function ghExecWithAttachmentState(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
-  const result = await run(buildArgs(args, ctx));
+  const result = await run(args, ctx);
   if (result.stderr === "ENOENT") throw missingGhError();
   if (result.exitCode !== 0) {
     const error = mapGhError(result.stderr, result.exitCode);
@@ -203,7 +202,7 @@ export async function ghRaw(
   args: string[],
   ctx?: RepoContext,
 ): Promise<ExecResult> {
-  const result = await run(buildArgs(args, ctx));
+  const result = await run(args, ctx);
   if (result.stderr === "ENOENT") throw missingGhError();
   return result;
 }
@@ -217,7 +216,7 @@ export async function ghExecWithStdin(
   input: string,
   ctx?: RepoContext,
 ): Promise<string> {
-  const result = await runWithStdin(buildArgs(args, ctx), input);
+  const result = await run(args, ctx, input);
   if (result.stderr === "ENOENT") throw missingGhError();
   if (result.exitCode !== 0) throw mapGhError(result.stderr, result.exitCode);
   return result.stdout;

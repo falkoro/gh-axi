@@ -314,4 +314,45 @@ describe("CLI entrypoint", () => {
       expect(rendered.split(assetUrl)).toHaveLength(2);
     });
   });
+
+  // `gh api` rejects --repo; it fills {owner}/{repo} from GH_REPO (#197).
+  it.each([
+    ["-R", ["-R", "octo/other"], undefined],
+    ["--repo=", ["--repo=octo/other"], undefined],
+    ["GH_REPO", [], "octo/other"],
+  ])(
+    "hands an api %s repo to gh as GH_REPO, never as --repo",
+    async (_source, repoArgs, envRepo) => {
+      const previousRepo = process.env["GH_REPO"];
+      if (envRepo === undefined) delete process.env["GH_REPO"];
+      else process.env["GH_REPO"] = envRepo;
+      try {
+        mockedExecFile.mockImplementation((_cmd, _args, _opts, callback) => {
+          (callback as ExecFileCallback)(null, '{"name":"other"}', "");
+          return {} as ReturnType<typeof execFile>;
+        });
+        const output = createStdout();
+
+        await main({
+          argv: ["api", "repos/{owner}/{repo}", ...repoArgs],
+          stdout: output.stdout,
+        });
+
+        const [, argv, opts] = mockedExecFile.mock.calls[0];
+        expect(argv).toEqual([
+          "api",
+          "repos/{owner}/{repo}",
+          "--method",
+          "GET",
+        ]);
+        expect((opts as { env?: NodeJS.ProcessEnv }).env?.["GH_REPO"]).toBe(
+          "octo/other",
+        );
+        expect(output.read()).toContain("name: other");
+      } finally {
+        if (previousRepo === undefined) delete process.env["GH_REPO"];
+        else process.env["GH_REPO"] = previousRepo;
+      }
+    },
+  );
 });

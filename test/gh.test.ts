@@ -367,7 +367,7 @@ describe("ghRaw", () => {
       nwo: "o/r",
       source: "env",
     };
-    await ghRaw(["api", "repos"], ctx);
+    await ghRaw(["release", "list"], ctx);
     const callArgs = mockedExecFile.mock.calls[0][1] as string[];
     expect(callArgs).toContain("--repo");
     expect(callArgs).toContain("o/r");
