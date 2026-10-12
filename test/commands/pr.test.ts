@@ -1477,6 +1477,32 @@ describe("prCommand", () => {
       expect(result).toContain("revert");
     });
 
+    it("reports enqueued over auto-merge when the PR is in the queue", async () => {
+      mockMerge({
+        state: "OPEN",
+        isInMergeQueue: true,
+        autoMergeRequest: { enabledAt: "2026-10-10T00:00:00Z" },
+      });
+
+      const result = await prCommand(["merge", "10"], ctx);
+
+      expect(result).toContain("status: enqueued");
+      expect(result).not.toContain("status: auto-merge");
+    });
+
+    it("reports merged over enqueued and auto-merge once the PR merged", async () => {
+      mockMerge({
+        state: "MERGED",
+        isInMergeQueue: true,
+        autoMergeRequest: { enabledAt: "2026-10-10T00:00:00Z" },
+      });
+
+      const result = await prCommand(["merge", "10"], ctx);
+
+      expect(result).toContain("status: merged");
+      expect(result).not.toMatch(/status: (enqueued|auto-merge)/);
+    });
+
     it("fails when gh exited 0 but the PR is neither merged, queued nor set to auto-merge", async () => {
       mockMerge({
         state: "OPEN",
