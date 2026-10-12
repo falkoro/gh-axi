@@ -484,7 +484,10 @@ describe("searchCommand", () => {
     );
 
     it("a repo: qualifier inside one positional drops the cwd repo", async () => {
-      const ghArgs = await forwarded(["issues", "login bug repo:cli/cli"], gitCtx);
+      const ghArgs = await forwarded(
+        ["issues", "login bug repo:cli/cli"],
+        gitCtx,
+      );
       expect(ghArgs).not.toContain("--repo");
     });
 
