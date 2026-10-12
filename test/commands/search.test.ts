@@ -453,4 +453,60 @@ describe("searchCommand", () => {
       expect(result).toContain("1000+");
     });
   });
+
+  describe("context repo next to an explicit scope", () => {
+    const gitCtx: RepoContext = { ...ctx, source: "git" };
+    const envCtx: RepoContext = { ...ctx, source: "env" };
+    const types = ["issues", "prs", "commits", "code"];
+
+    async function forwarded(args: string[], repoCtx: RepoContext) {
+      mockedGhJson.mockResolvedValue([]);
+      await searchCommand(args, repoCtx);
+      return mockedGhJson.mock.calls[0][0];
+    }
+
+    it.each(types)("%s: --owner drops the cwd repo", async (type) => {
+      const ghArgs = await forwarded([type, "--owner", "cli", "x"], gitCtx);
+      expect(ghArgs).not.toContain("--repo");
+      expect(ghArgs).toEqual(expect.arrayContaining(["--owner", "cli"]));
+    });
+
+    it.each(["org:cli", "user:cli", "repo:cli/cli"])(
+      "a %s qualifier drops the cwd repo",
+      async (qualifier) => {
+        for (const type of types) {
+          mockedGhJson.mockClear();
+          const ghArgs = await forwarded([type, qualifier, "x"], gitCtx);
+          expect(ghArgs).not.toContain("--repo");
+          expect(ghArgs.slice(-3)).toEqual(["--", qualifier, "x"]);
+        }
+      },
+    );
+
+    it("--owner=value drops the GH_REPO repo", async () => {
+      const ghArgs = await forwarded(["prs", "--owner=cli", "x"], envCtx);
+      expect(ghArgs).not.toContain("--repo");
+    });
+
+    it("keeps the cwd repo without an explicit scope", async () => {
+      const ghArgs = await forwarded(
+        ["issues", "--author", "alice", "REPO:cli/cli", "--", "-org:cli"],
+        gitCtx,
+      );
+      expect(ghArgs).toEqual(expect.arrayContaining(["--repo", "octo/repo"]));
+    });
+
+    it("keeps an explicit -R or --repo next to --owner", async () => {
+      expect(await forwarded(["prs", "--owner", "cli", "x"], ctx)).toEqual(
+        expect.arrayContaining(["--repo", "octo/repo", "--owner", "cli"]),
+      );
+      mockedGhJson.mockClear();
+      expect(
+        await forwarded(
+          ["prs", "--repo", "a/b", "--owner", "cli", "x"],
+          gitCtx,
+        ),
+      ).toEqual(expect.arrayContaining(["--repo", "a/b", "--owner", "cli"]));
+    });
+  });
 });
