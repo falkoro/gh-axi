@@ -68,6 +68,19 @@ async function withBodyFile<T>(
   }
 }
 
+/**
+ * A `pr merge` run: the pre-merge `pr view` sees an open PR, `gh pr merge`
+ * exits 0, and the post-merge GraphQL re-read returns `after`.
+ */
+function mockMerge(after: Record<string, unknown> = { state: "MERGED" }) {
+  mockedGhJson.mockImplementation(async (args: string[]) =>
+    args[0] === "api"
+      ? { data: { node: after } }
+      : { state: "OPEN", id: "PR_node" },
+  );
+  mockedGhExec.mockResolvedValue("");
+}
+
 describe("prCommand", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -1192,8 +1205,7 @@ describe("prCommand", () => {
     ])(
       "maps %s shorthand to a gh merge method flag",
       async (input, ghFlag, method) => {
-        mockedGhJson.mockResolvedValue({ state: "OPEN" });
-        mockedGhExec.mockResolvedValue("");
+        mockMerge();
 
         const result = await prCommand(
           ["merge", "10", input, "--delete-branch"],
@@ -1209,8 +1221,7 @@ describe("prCommand", () => {
     );
 
     it("keeps --method working", async () => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       await prCommand(["merge", "10", "--method", "squash"], ctx);
 
@@ -1221,8 +1232,7 @@ describe("prCommand", () => {
     });
 
     it("forwards --admin to gh and records the bypass", async () => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       const result = await prCommand(["merge", "10", "--admin"], ctx);
 
@@ -1234,8 +1244,7 @@ describe("prCommand", () => {
     });
 
     it("reports admin: no when the flag is absent", async () => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       const result = await prCommand(["merge", "10", "--squash"], ctx);
 
@@ -1243,8 +1252,7 @@ describe("prCommand", () => {
     });
 
     it("composes --admin with a merge method, --delete-branch and commit text", async () => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       await prCommand(
         [
@@ -1280,8 +1288,7 @@ describe("prCommand", () => {
 
     it("forwards an exact head commit condition with the selected merge options", async () => {
       const head = "0123456789abcdef0123456789abcdef01234567";
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       await prCommand(
         [
@@ -1367,8 +1374,7 @@ describe("prCommand", () => {
     });
 
     it("forwards a bare --auto to gh", async () => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       await prCommand(["merge", "10", "--auto"], ctx);
 
@@ -1386,8 +1392,7 @@ describe("prCommand", () => {
       "--rebase=true",
       "--delete-branch=false",
     ])("rejects the %s form instead of dropping it", async (token) => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       const flag = token.split("=")[0];
       await expect(prCommand(["merge", "10", token], ctx)).rejects.toThrow(
@@ -1398,8 +1403,7 @@ describe("prCommand", () => {
     });
 
     it("rejects --admin=true even when another switch would merge", async () => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
-      mockedGhExec.mockResolvedValue("");
+      mockMerge();
 
       await expect(
         prCommand(["merge", "10", "--squash", "--admin=true"], ctx),
@@ -1414,8 +1418,7 @@ describe("prCommand", () => {
     ])(
       "rejects %s %s instead of using the switch as text",
       async (option, token) => {
-        mockedGhJson.mockResolvedValue({ state: "OPEN" });
-        mockedGhExec.mockResolvedValue("");
+        mockMerge();
 
         await expect(
           prCommand(["merge", "10", option, token], ctx),
@@ -1425,9 +1428,81 @@ describe("prCommand", () => {
       },
     );
 
-    it("keeps value-taking merge flags working in the --flag=value form", async () => {
-      mockedGhJson.mockResolvedValue({ state: "OPEN" });
+    it.each([[[]], [["--auto"]], [["--admin"]]])(
+      "reports enqueued, not merged, when gh %j only queued the PR",
+      async (flags) => {
+        mockMerge({
+          state: "OPEN",
+          isInMergeQueue: true,
+          autoMergeRequest: null,
+        });
+
+        const result = await prCommand(["merge", "10", ...flags], ctx);
+
+        expect(mockedGhJson).toHaveBeenLastCalledWith([
+          "api",
+          "graphql",
+          "-f",
+          "id=PR_node",
+          "-f",
+          expect.stringContaining("isInMergeQueue"),
+        ]);
+        expect(result).toContain("merge:");
+        expect(result).toContain("status: enqueued");
+        expect(result).not.toMatch(/^merged:|status: (merged|ok)/m);
+        expect(result).not.toContain("revert");
+        expect(result).toContain("pr view 10 -R octo/repo");
+      },
+    );
+
+    it("reports auto-merge when gh only enabled auto-merge", async () => {
+      mockMerge({
+        state: "OPEN",
+        isInMergeQueue: false,
+        autoMergeRequest: { enabledAt: "2026-10-10T00:00:00Z" },
+      });
+
+      const result = await prCommand(["merge", "10", "--auto"], ctx);
+
+      expect(result).toContain("status: auto-merge");
+      expect(result).not.toContain("status: ok");
+    });
+
+    it("reports merged once the re-read confirms it", async () => {
+      mockMerge({ state: "MERGED" });
+
+      const result = await prCommand(["merge", "10", "--admin"], ctx);
+
+      expect(result).toContain("status: merged");
+      expect(result).toContain("revert");
+    });
+
+    it("fails when gh exited 0 but the PR is neither merged, queued nor set to auto-merge", async () => {
+      mockMerge({
+        state: "OPEN",
+        isInMergeQueue: false,
+        autoMergeRequest: null,
+      });
+
+      await expect(prCommand(["merge", "10", "--auto"], ctx)).rejects.toThrow(
+        "gh pr merge exited 0, but PR #10 is open: not merged, not in a merge queue, and auto-merge is not enabled",
+      );
+    });
+
+    it("reports a failed re-read as a follow-up failure, not a failed merge", async () => {
+      mockedGhJson.mockImplementation(async (args: string[]) => {
+        if (args[0] === "api") throw new AxiError("HTTP 502", "UNKNOWN");
+        return { state: "OPEN", id: "PR_node" };
+      });
       mockedGhExec.mockResolvedValue("");
+
+      await expect(prCommand(["merge", "10"], ctx)).rejects.toThrow(
+        "Mutation succeeded at PR #10, but follow-up operation failed: HTTP 502",
+      );
+    });
+
+    it("keeps value-taking merge flags working in the --flag=value form", async () => {
+      mockMerge();
 
       await prCommand(
         ["merge", "10", "--method=squash", "--body=why", "--subject=ship it"],
@@ -1486,8 +1561,7 @@ describe("prCommand", () => {
 
     it("uses file contents for pr merge", async () => {
       await withBodyFile(markdownBody, async (file) => {
-        mockedGhJson.mockResolvedValue({ state: "OPEN" });
-        mockedGhExec.mockResolvedValue("");
+        mockMerge();
 
         await prCommand(["merge", "123", "--squash", "--body-file", file], ctx);
 

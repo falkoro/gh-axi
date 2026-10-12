@@ -13,7 +13,13 @@ function optionValue(name) {
 }
 
 if (args[0] === "pr" && args[1] === "view") {
-  process.stdout.write('{"state":"OPEN"}\n');
+  process.stdout.write('{"state":"OPEN","id":"PR_node"}\n');
+  process.exit(0);
+}
+
+// pr merge re-reads the PR to report what the merge did.
+if (args[0] === "api" && args[1] === "graphql") {
+  process.stdout.write('{"data":{"node":{"state":"MERGED"}}}\n');
   process.exit(0);
 }
 

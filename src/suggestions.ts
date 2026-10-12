@@ -241,6 +241,17 @@ const table: SuggestionEntry[] = [
 
   // PR merge
   {
+    // Queued, waiting on auto-merge, or not merged at all: nothing to revert.
+    match: (c) =>
+      c.domain === "pr" &&
+      c.action === "merge" &&
+      c.state !== undefined &&
+      c.state !== "merged",
+    lines: (c) => [
+      `Run \`gh-axi${repoFlag(c)} pr view ${c.id}\` to see whether it has merged`,
+    ],
+  },
+  {
     match: (c) => c.domain === "pr" && c.action === "merge",
     lines: (c) => [
       `Run \`gh-axi${repoFlag(c)} pr revert ${c.id}\` to revert if needed`,

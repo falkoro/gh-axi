@@ -7,7 +7,11 @@ import {
   ensureAttachmentSupport,
   ghRaw,
 } from "../gh.js";
-import { AttachmentMutationError, AxiError } from "../errors.js";
+import {
+  AttachmentMutationError,
+  AxiError,
+  MutationFollowupError,
+} from "../errors.js";
 import { takeBody, truncateBody } from "../body.js";
 import { fetchCreatedComment } from "../comment.js";
 import {
@@ -871,10 +875,9 @@ async function prMerge(args: string[], ctx?: RepoContext): Promise<string> {
   const subject = takeFlag(args, "--subject");
 
   // Idempotent: check if already merged
-  const pr = await ghJson<Pick<PrItem, "state" | "mergedBy" | "mergedAt">>(
-    ["pr", "view", String(num), "--json", "state,mergedBy,mergedAt"],
-    ctx,
-  );
+  const pr = await ghJson<
+    Pick<PrItem, "state" | "mergedBy" | "mergedAt"> & { id: string }
+  >(["pr", "view", String(num), "--json", "state,mergedBy,mergedAt,id"], ctx);
   if ((pr.state ?? "").toUpperCase() === "MERGED") {
     return renderOutput([
       renderDetail(
@@ -908,17 +911,71 @@ async function prMerge(args: string[], ctx?: RepoContext): Promise<string> {
   if (matchHeadCommit) ghArgs.push("--match-head-commit", matchHeadCommit);
 
   await ghExec(ghArgs, ctx);
+  const status = await mergeOutcome(num, pr.id, ctx);
 
   return renderOutput([
     renderDetail(
-      "merged",
-      { number: num, status: "ok", method: method ?? "default", admin },
+      "merge",
+      { number: num, status, method: method ?? "default", admin },
       [field("number"), field("status"), field("method"), boolYesNo("admin")],
     ),
     renderHelp(
-      getSuggestions({ domain: "pr", action: "merge", id: num, repo: ctx }),
+      getSuggestions({
+        domain: "pr",
+        action: "merge",
+        state: status,
+        id: num,
+        repo: ctx,
+      }),
     ),
   ]);
+}
+
+const MERGE_OUTCOME_QUERY =
+  "query($id:ID!){node(id:$id){... on PullRequest{state isInMergeQueue autoMergeRequest{enabledAt}}}}";
+
+/**
+ * What `gh pr merge` actually did. It exits 0 whether it merged the PR, added
+ * it to a merge queue, or only enabled auto-merge, so re-read the PR. `pr view
+ * --json` has no merge-queue field, hence GraphQL by node ID. `gh api` rejects
+ * `--repo`, so `ctx` only feeds the suggestions.
+ */
+async function mergeOutcome(
+  num: number,
+  id: string,
+  ctx?: RepoContext,
+): Promise<"merged" | "enqueued" | "auto-merge"> {
+  let after:
+    | { state?: string; isInMergeQueue?: boolean; autoMergeRequest?: unknown }
+    | undefined;
+  try {
+    const result = await ghJson<{ data?: { node?: typeof after } }>([
+      "api",
+      "graphql",
+      "-f",
+      `id=${id}`,
+      "-f",
+      `query=${MERGE_OUTCOME_QUERY}`,
+    ]);
+    after = result.data?.node;
+  } catch (error) {
+    throw MutationFollowupError.from(`PR #${num}`, error);
+  }
+  const state = (after?.state ?? "unknown").toLowerCase();
+  if (state === "merged") return "merged";
+  if (after?.isInMergeQueue) return "enqueued";
+  if (after?.autoMergeRequest) return "auto-merge";
+  throw new AxiError(
+    `gh pr merge exited 0, but PR #${num} is ${state}: not merged, not in a merge queue, and auto-merge is not enabled`,
+    "UNKNOWN",
+    getSuggestions({
+      domain: "pr",
+      action: "merge",
+      state,
+      id: num,
+      repo: ctx,
+    }),
+  );
 }
 
 async function prReview(args: string[], ctx?: RepoContext): Promise<string> {
