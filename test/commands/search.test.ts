@@ -483,6 +483,19 @@ describe("searchCommand", () => {
       },
     );
 
+    it("a repo: qualifier inside one positional drops the cwd repo", async () => {
+      const ghArgs = await forwarded(["issues", "login bug repo:cli/cli"], gitCtx);
+      expect(ghArgs).not.toContain("--repo");
+    });
+
+    it.each([[["is:open org:cli"]], [["--", "x -org:cli"]]])(
+      "keeps the cwd repo for the positional %j",
+      async (query) => {
+        const ghArgs = await forwarded(["issues", ...query], gitCtx);
+        expect(ghArgs).toEqual(expect.arrayContaining(["--repo", "octo/repo"]));
+      },
+    );
+
     it("--owner=value drops the GH_REPO repo", async () => {
       const ghArgs = await forwarded(["prs", "--owner=cli", "x"], envCtx);
       expect(ghArgs).not.toContain("--repo");

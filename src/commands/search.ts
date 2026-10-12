@@ -187,8 +187,10 @@ function extractQuery(args: string[]): string[] {
   return positionals;
 }
 
-// GitHub only honors lowercase qualifiers (`REPO:x` is plain text).
-const SCOPE_QUALIFIER = /^(org|user|repo):/;
+// gh splits each query argument at its first colon and quotes only what
+// follows, so an argument is a scope when the last whitespace-separated token
+// before that colon is org, user or repo. GitHub ignores uppercase qualifiers.
+const SCOPE_QUALIFIER = /^(?:[^:]*\s)?(?:org|user|repo):/;
 
 function getSearchRepo(
   args: string[],
