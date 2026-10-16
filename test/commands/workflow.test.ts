@@ -1,4 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { decode } from '@toon-format/toon';
 
 vi.mock('../../src/gh.js', () => ({
   ghJson: vi.fn(),
@@ -119,13 +120,12 @@ describe('workflowCommand', () => {
     });
 
     it('prints the workflow YAML with --yaml', async () => {
-      mockedGhExec.mockResolvedValue('name: CI\non: push\n');
+      const yaml = 'name: CI\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n';
+      mockedGhExec.mockResolvedValue(yaml);
       const result = await workflowCommand(['view', 'ci.yml', '--yaml'], ctx);
       expect(mockedGhExec).toHaveBeenCalledWith(['workflow', 'view', 'ci.yml', '--yaml'], ctx);
       expect(mockedGhJson).not.toHaveBeenCalled();
-      expect(result).toContain('workflow_yaml');
-      expect(result).toContain('name: CI');
-      expect(result).toContain('on: push');
+      expect(decode(result)).toEqual({ workflow_yaml: { workflow: 'ci.yml', yaml } });
     });
 
     it('rejects --yaml=true instead of silently dropping the opt-in', async () => {
