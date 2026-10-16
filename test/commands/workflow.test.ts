@@ -6,12 +6,13 @@ vi.mock('../../src/gh.js', () => ({
   ghRaw: vi.fn(),
 }));
 
-import { ghJson } from '../../src/gh.js';
+import { ghJson, ghExec } from '../../src/gh.js';
 import { workflowCommand, WORKFLOW_HELP } from '../../src/commands/workflow.js';
 import { AxiError } from '../../src/errors.js';
 import type { RepoContext } from '../../src/context.js';
 
 const mockedGhJson = vi.mocked(ghJson);
+const mockedGhExec = vi.mocked(ghExec);
 
 const ctx: RepoContext = { owner: 'octo', name: 'repo', nwo: 'octo/repo', source: 'flag' };
 
@@ -115,6 +116,25 @@ describe('workflowCommand', () => {
       ]);
       const result = await workflowCommand(['view', 'CI'], ctx);
       expect(result).not.toMatch(/^help\[/m);
+    });
+
+    it('prints the workflow YAML with --yaml', async () => {
+      mockedGhExec.mockResolvedValue('name: CI\non: push\n');
+      const result = await workflowCommand(['view', 'ci.yml', '--yaml'], ctx);
+      expect(mockedGhExec).toHaveBeenCalledWith(['workflow', 'view', 'ci.yml', '--yaml'], ctx);
+      expect(mockedGhJson).not.toHaveBeenCalled();
+      expect(result).toContain('workflow_yaml');
+      expect(result).toContain('name: CI');
+      expect(result).toContain('on: push');
+    });
+
+    it('returns metadata only without --yaml', async () => {
+      mockedGhJson.mockResolvedValue([
+        { id: 1, name: 'CI', state: 'active', path: '.github/workflows/ci.yml' },
+      ]);
+      const result = await workflowCommand(['view', 'CI'], ctx);
+      expect(mockedGhExec).not.toHaveBeenCalled();
+      expect(result).not.toContain('workflow_yaml');
     });
 
     it('throws when workflow not found', async () => {
