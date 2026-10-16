@@ -128,6 +128,14 @@ describe('workflowCommand', () => {
       expect(result).toContain('on: push');
     });
 
+    it('rejects --yaml=true instead of silently dropping the opt-in', async () => {
+      await expect(
+        workflowCommand(['view', 'ci.yml', '--yaml=true'], ctx),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(mockedGhExec).not.toHaveBeenCalled();
+      expect(mockedGhJson).not.toHaveBeenCalled();
+    });
+
     it('returns metadata only without --yaml', async () => {
       mockedGhJson.mockResolvedValue([
         { id: 1, name: 'CI', state: 'active', path: '.github/workflows/ci.yml' },

@@ -2,7 +2,7 @@ import { encode } from '@toon-format/toon';
 import type { RepoContext } from '../context.js';
 import { ghJson, ghExec } from '../gh.js';
 import { AxiError } from '../errors.js';
-import { getFlag, hasFlag, getAllFlags, rejectUnknownFlags } from '../args.js';
+import { getFlag, hasFlag, getAllFlags, rejectUnknownFlags, takeBoolFlag } from '../args.js';
 import {
   field,
   lower,
@@ -91,7 +91,7 @@ async function viewWorkflow(args: string[], ctx?: RepoContext): Promise<string> 
   const id = positionals[1];
   if (!id) throw new AxiError('Workflow ID or name is required: gh-axi workflow view <id|name>', 'VALIDATION_ERROR');
 
-  if (hasFlag(args, '--yaml')) {
+  if (takeBoolFlag(args, '--yaml')) {
     const yaml = await ghExec(['workflow', 'view', id, '--yaml'], ctx);
     return encode({ workflow_yaml: { workflow: id, yaml } });
   }
