@@ -76,6 +76,10 @@ interface StatusCheck {
   state?: string;
   /** CheckRun: QUEUED | IN_PROGRESS | COMPLETED. Carries no verdict. */
   status?: string;
+  /** CheckRun: the workflow the run belongs to; part of its identity. */
+  workflowName?: string;
+  /** ISO time the run started; absent or zero while still queued. */
+  startedAt?: string;
 }
 
 interface PrComment {
@@ -157,6 +161,31 @@ function classifyCheck(
   if (state === "FAILURE" || state === "ERROR") return "fail";
   if (state === "EXPECTED" || state === "NEUTRAL") return "skip";
   return "pending";
+}
+
+/** Start time for ordering; a run not started yet counts as the newest. */
+function checkStartMs(c: StatusCheck): number {
+  const t = Date.parse(c.startedAt ?? "");
+  return Number.isNaN(t) || t <= 0 ? Infinity : t;
+}
+
+/**
+ * Keep only the latest run of each check, like gh's `eliminateDuplicates`:
+ * a re-run supersedes the earlier run of the same check, so a passing re-run
+ * hides the failure it replaced. A status context is keyed by its context, a
+ * check run by name plus workflow.
+ */
+function latestChecks(checks: StatusCheck[]): StatusCheck[] {
+  const key = (c: StatusCheck) =>
+    c.context
+      ? `context:${c.context}`
+      : `check:${c.name ?? ""}/${c.workflowName ?? ""}`;
+  const latest = new Map<string, StatusCheck>();
+  for (const c of checks) {
+    const prev = latest.get(key(c));
+    if (!prev || checkStartMs(c) > checkStartMs(prev)) latest.set(key(c), c);
+  }
+  return checks.filter((c) => latest.get(key(c)) === c);
 }
 
 interface CheckCounts {
@@ -554,6 +583,9 @@ async function prView(args: string[], ctx?: RepoContext): Promise<string> {
   // Always fetch comments + review summaries (for count or full rendering)
   const ghArgs = ["pr", "view", String(num), "--json", VIEW_JSON_FIELDS];
   const pr = await ghJson<PrItem>(ghArgs, ctx);
+  if (Array.isArray(pr.statusCheckRollup)) {
+    pr.statusCheckRollup = latestChecks(pr.statusCheckRollup);
+  }
 
   const schema = withMergeState(full ? viewSchemaFull : viewSchema, pr, ctx);
   if (includeComments && Array.isArray(pr.comments)) {
@@ -1202,7 +1234,9 @@ async function fetchChecks(
     ["pr", "view", String(num), "--json", "statusCheckRollup"],
     ctx,
   );
-  return Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+  return Array.isArray(pr.statusCheckRollup)
+    ? latestChecks(pr.statusCheckRollup)
+    : [];
 }
 
 async function prChecks(args: string[], ctx?: RepoContext): Promise<string> {

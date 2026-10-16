@@ -410,6 +410,38 @@ describe("prCommand", () => {
       expect(result).toContain("1 passed, 1 failed");
       expect(result).toContain("lint,fail");
     });
+    it("drops a superseded run from the view summary and --checks rows", async () => {
+      mockedGhJson.mockResolvedValue({
+        number: 42,
+        title: "My PR",
+        state: "OPEN",
+        author: { login: "alice" },
+        isDraft: false,
+        mergedAt: null,
+        statusCheckRollup: [
+          {
+            name: "lint",
+            workflowName: "CI",
+            conclusion: "FAILURE",
+            startedAt: "2026-01-01T10:00:00Z",
+          },
+          {
+            name: "lint",
+            workflowName: "CI",
+            conclusion: "SUCCESS",
+            startedAt: "2026-01-01T11:00:00Z",
+          },
+        ],
+        body: "",
+        comments: [],
+        reviews: [],
+      });
+
+      const result = await prCommand(["view", "42", "--checks"], ctx);
+
+      expect(result).toContain("1 passed, 0 failed");
+      expect(result).not.toContain("lint,fail");
+    });
     it("shows a pending count in the view summary when checks are unfinished", async () => {
       // The view summary field (no --checks) previously hid pending checks:
       // a PR with only queued checks read "0 passed, 0 failed, 1 total".
@@ -1829,6 +1861,87 @@ describe("prCommand", () => {
 
       await prCommand(["checks", "5"], ctx);
 
+      expect(process.exitCode).toBe(1);
+    });
+
+    it("counts only the latest run of a re-run check, like gh", async () => {
+      mockedGhJson.mockResolvedValue({
+        statusCheckRollup: [
+          {
+            name: "test",
+            workflowName: "CI",
+            conclusion: "FAILURE",
+            startedAt: "2026-01-01T10:00:00Z",
+          },
+          {
+            name: "test",
+            workflowName: "CI",
+            conclusion: "SUCCESS",
+            startedAt: "2026-01-01T11:00:00Z",
+          },
+        ],
+      });
+
+      const result = await prCommand(["checks", "5"], ctx);
+
+      expect(result).toContain("1 passed, 0 failed");
+      expect(result).toContain("1 total");
+      expect(result).not.toContain("test,fail");
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it("treats a queued re-run with no startedAt as the newest run", async () => {
+      mockedGhJson.mockResolvedValue({
+        statusCheckRollup: [
+          {
+            name: "test",
+            workflowName: "CI",
+            conclusion: null,
+            status: "QUEUED",
+            startedAt: "0001-01-01T00:00:00Z",
+          },
+          {
+            name: "test",
+            workflowName: "CI",
+            conclusion: "FAILURE",
+            startedAt: "2026-01-01T10:00:00Z",
+          },
+          { name: "lint", workflowName: "CI", conclusion: null },
+          {
+            name: "lint",
+            workflowName: "CI",
+            conclusion: "FAILURE",
+            startedAt: "2026-01-01T10:00:00Z",
+          },
+        ],
+      });
+
+      await prCommand(["checks", "5"], ctx);
+
+      expect(process.exitCode).toBe(8);
+    });
+
+    it("keeps same-named checks from different workflows", async () => {
+      mockedGhJson.mockResolvedValue({
+        statusCheckRollup: [
+          {
+            name: "build",
+            workflowName: "CI",
+            conclusion: "SUCCESS",
+            startedAt: "2026-01-01T10:00:00Z",
+          },
+          {
+            name: "build",
+            workflowName: "Release",
+            conclusion: "FAILURE",
+            startedAt: "2026-01-01T09:00:00Z",
+          },
+        ],
+      });
+
+      const result = await prCommand(["checks", "5"], ctx);
+
+      expect(result).toContain("1 passed, 1 failed");
       expect(process.exitCode).toBe(1);
     });
 
