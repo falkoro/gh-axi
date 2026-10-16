@@ -179,7 +179,7 @@ function latestChecks(checks: StatusCheck[]): StatusCheck[] {
   const key = (c: StatusCheck) =>
     c.context
       ? `context:${c.context}`
-      : `check:${c.name ?? ""}/${c.workflowName ?? ""}`;
+      : `check:${JSON.stringify([c.name ?? "", c.workflowName ?? ""])}`;
   const latest = new Map<string, StatusCheck>();
   for (const c of checks) {
     const prev = latest.get(key(c));

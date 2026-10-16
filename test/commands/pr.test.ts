@@ -1945,6 +1945,37 @@ describe("prCommand", () => {
       expect(process.exitCode).toBe(1);
     });
 
+    it.each([
+      ["test/unit", "CI", "test", "unit/CI"],
+      ["test", "unit/CI", "test/unit", "CI"],
+    ])(
+      "keeps %s in %s apart from %s in %s when the older one failed",
+      async (failName, failWorkflow, passName, passWorkflow) => {
+        mockedGhJson.mockResolvedValue({
+          statusCheckRollup: [
+            {
+              name: failName,
+              workflowName: failWorkflow,
+              conclusion: "FAILURE",
+              startedAt: "2026-01-01T09:00:00Z",
+            },
+            {
+              name: passName,
+              workflowName: passWorkflow,
+              conclusion: "SUCCESS",
+              startedAt: "2026-01-01T10:00:00Z",
+            },
+          ],
+        });
+
+        const result = await prCommand(["checks", "5"], ctx);
+
+        expect(result).toContain("1 passed, 1 failed");
+        expect(result).toContain("2 total");
+        expect(process.exitCode).toBe(1);
+      },
+    );
+
     it("exits 8 and suggests --watch when a check is pending", async () => {
       mockedGhJson.mockResolvedValue({
         statusCheckRollup: [
